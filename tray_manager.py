@@ -230,8 +230,8 @@ class SettingsWindow:
 
         check_row(f_card, '✅  Auto-correct words on Space', ac_var,
                   'Silently fixes spelling after each word — all languages')
-        check_row(f_card, '✅  Fix sentence on Alt + Shift + S', sf_var,
-                  'Select any text → press Alt+Shift+S → AI rewrites it')
+        check_row(f_card, '✅  Fix sentence on F9', sf_var,
+                  'Select any text → press F9 → AI rewrites it')
         check_row(f_card, '🚀  Start KeyWise AI with Windows', as_var,
                   'Added to startup registry (current user only)')
 

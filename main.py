@@ -14,10 +14,12 @@ def main():
     from keyboard_hook import KeyboardHook
     from tray_manager import TrayManager
     from setup_autostart import setup_autostart
+    from typing_habits import TypingHabits
 
     # ── Bootstrap ──
     config = Config()
     groq_client = GroqClient(config)
+    habits = TypingHabits()
 
     sentence_fixer = SentenceFixer(config, groq_client)
     autocorrect    = AutoCorrect(config, groq_client)
@@ -25,6 +27,7 @@ def main():
     keyboard_hook  = KeyboardHook(
         config, autocorrect, sentence_fixer,
         groq_client=groq_client,
+        typing_habits=habits,
     )
     tray = TrayManager(config, groq_client, keyboard_hook)
 

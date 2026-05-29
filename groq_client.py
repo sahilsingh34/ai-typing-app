@@ -36,13 +36,16 @@ _AUTOCORRECT_PROMPT = (
 )
 
 _SENTENCE_FIX_PROMPT = (
-    "Fix spelling, grammar, and clarity of the text below.\n"
-    "The text may be in English or Hinglish (Hindi words in Roman script).\n"
-    "Rules:\n"
-    "- Preserve the original language and intended meaning.\n"
-    "- Keep Hinglish words in Roman script, do not convert to Devanagari.\n"
-    "- Fix spelling and grammatical errors naturally.\n"
-    "- Return ONLY the corrected text, nothing else. No commentary."
+    "You are a grammar and spelling corrector. Fix ONLY errors in the text below.\n"
+    "STRICT RULES — you MUST follow all of these:\n"
+    "- Fix ONLY spelling mistakes, grammar errors, and punctuation.\n"
+    "- Do NOT add any new words, sentences, or explanations.\n"
+    "- Do NOT expand, elaborate, or rewrite the text.\n"
+    "- Do NOT change the meaning, tone, or structure.\n"
+    "- The output MUST be approximately the same length as the input.\n"
+    "- Keep Hinglish words in Roman script (e.g. 'accha', 'theek').\n"
+    "- Return ONLY the corrected text. No commentary, no labels, nothing else.\n"
+    "If the text has no errors, return it exactly as-is."
 )
 
 _SUGGEST_PROMPT = (
@@ -163,12 +166,17 @@ class GroqClient:
 
     def fix_sentence(self, text: str) -> str:
         """
-        Fix grammar, spelling, and clarity of selected text.
-        Returns the corrected version, or the original on failure.
+        Fix grammar, spelling, and punctuation of selected text.
+        Returns the corrected version (same length), or the original on failure.
         """
         client = self._groq
         if client is None or not text.strip():
             return text
+
+        # Cap output tokens to ~2× the input word count so the LLM
+        # cannot expand a short sentence into a paragraph.
+        word_count = len(text.split())
+        max_tok = max(60, word_count * 2)
 
         try:
             response = client.chat.completions.create(
@@ -177,8 +185,8 @@ class GroqClient:
                     {'role': 'system', 'content': _SENTENCE_FIX_PROMPT},
                     {'role': 'user',   'content': text},
                 ],
-                max_tokens=1024,
-                temperature=0.1,
+                max_tokens=max_tok,
+                temperature=0.0,   # Deterministic — no creative expansion
                 timeout=10.0,
             )
             result = response.choices[0].message.content.strip()
