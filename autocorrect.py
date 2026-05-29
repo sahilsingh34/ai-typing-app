@@ -64,11 +64,15 @@ class AutoCorrect:
         # Query Groq (takes ~200-1500ms)
         corrected = self.groq.correct_word(word, context)
 
-        if not corrected or corrected.lower() == word.lower():
+        if not corrected:
             return  # Nothing to fix
 
-        # Preserve original capitalisation
+        # Preserve original capitalisation before comparing
         corrected = self._match_case(word, corrected)
+
+        # Now check if anything actually changed (case-sensitive)
+        if corrected == word:
+            return  # Word is already correct (including case)
 
         # Calculate how many chars user typed SINCE this trigger
         pos_now = self._snapshot_position()
@@ -79,11 +83,17 @@ class AutoCorrect:
     # ── Internal ───────────────────────────────────────────────────────────────
     @staticmethod
     def _match_case(original: str, corrected: str) -> str:
+        """Match the capitalisation pattern of the original word."""
         if not original or not corrected:
             return corrected
+        # ALL CAPS (e.g. "ILLUSION", "NASA")
+        if original.isupper():
+            return corrected.upper()
+        # Title Case (e.g. "Hello", "London")
         if original[0].isupper():
-            return corrected[0].upper() + corrected[1:]
-        return corrected
+            return corrected[0].upper() + corrected[1:].lower()
+        # Lowercase — return as-is from LLM
+        return corrected.lower()
 
     def _apply(self, original: str, corrected: str, chars_after: int):
         """
