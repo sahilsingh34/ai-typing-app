@@ -23,6 +23,7 @@ def main():
 
     sentence_fixer = SentenceFixer(config, groq_client)
     autocorrect    = AutoCorrect(config, groq_client)
+    autocorrect.habits = habits  # Connect self-learning habits engine
 
     keyboard_hook  = KeyboardHook(
         config, autocorrect, sentence_fixer,

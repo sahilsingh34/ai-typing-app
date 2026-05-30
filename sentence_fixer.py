@@ -16,8 +16,9 @@ class SentenceFixer:
         self.config = config
         self.groq = groq_client
         self._lock = threading.Lock()   # Prevent concurrent fixes
+        self.is_simulating = False      # Track simulated key events
 
-    def trigger(self):
+    def trigger(self, hook=None):
         """
         Entry point — called in a background thread.
         1. Copy selection (Ctrl+C)
@@ -29,17 +30,26 @@ class SentenceFixer:
             return  # Already running
 
         try:
-            self._fix()
+            self._fix(hook)
         finally:
             self._lock.release()
 
     # ── Core fix workflow ───────────────────────────────────────────────────────
-    def _fix(self):
+    def _fix(self, hook=None):
+        import win32gui
         # ① Save original clipboard
         try:
             original_clip = pyperclip.paste()
         except Exception:
             original_clip = ''
+
+        # Record starting state
+        start_keys = hook.keystroke_count if hook else 0
+        start_hwnd = None
+        try:
+            start_hwnd = win32gui.GetForegroundWindow()
+        except Exception:
+            pass
 
         try:
             # ② Clear clipboard so we can detect if Ctrl+C worked
@@ -47,8 +57,12 @@ class SentenceFixer:
             time.sleep(0.05)
 
             # ③ Copy currently selected text
-            keyboard.send('ctrl+c')
-            time.sleep(0.30)   # Give OS time to populate clipboard
+            try:
+                self.is_simulating = True
+                keyboard.send('ctrl+c')
+                time.sleep(0.30)   # Give OS time to populate clipboard
+            finally:
+                self.is_simulating = False
 
             try:
                 selected = pyperclip.paste()
@@ -61,14 +75,28 @@ class SentenceFixer:
             # ④ Fix with Groq
             fixed = self.groq.fix_sentence(selected)
 
+            # Safety check: if user typed something or switched window during the API call, abort!
+            if hook and hook.keystroke_count != start_keys:
+                return
+            if start_hwnd:
+                try:
+                    if win32gui.GetForegroundWindow() != start_hwnd:
+                        return
+                except Exception:
+                    pass
+
             if not fixed or fixed == selected:
                 return  # No change
 
             # ⑤ Paste the fixed text back
-            pyperclip.copy(fixed)
-            time.sleep(0.05)
-            keyboard.send('ctrl+v')
-            time.sleep(0.15)
+            try:
+                self.is_simulating = True
+                pyperclip.copy(fixed)
+                time.sleep(0.05)
+                keyboard.send('ctrl+v')
+                time.sleep(0.15)
+            finally:
+                self.is_simulating = False
 
         except Exception:
             pass
@@ -80,3 +108,4 @@ class SentenceFixer:
                 pyperclip.copy(original_clip)
             except Exception:
                 pass
+

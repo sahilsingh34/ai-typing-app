@@ -59,6 +59,10 @@ class KeyboardHook:
         # Currently active full predicted suggestion word
         self._active_suggestion: str = ""
 
+        # Keystroke count for safety guards (tracks user typing)
+        self.keystroke_count: int = 0
+
+
     # ── Lifecycle ────────────────────────────────────────────────────────────────
     def start(self) -> None:
         self._running = True
@@ -96,7 +100,9 @@ class KeyboardHook:
         if self.config.get('sentence_fix_enabled') and self.config.get('enabled'):
             self._ghost.hide()
             threading.Thread(target=self.sentence_fixer.trigger,
+                             args=(self,),
                              daemon=True).start()
+
 
     # ── Ghost text helpers ───────────────────────────────────────────────────────
     def _cancel_suggestion(self) -> None:
@@ -122,7 +128,6 @@ class KeyboardHook:
 
             for ch in word + ' ':
                 self._ctx_buf.append(ch)
-                self.autocorrect.notify_new_char()
             self._trim_ctx()
 
             # Record full completed word (prefix + suffix)
@@ -166,7 +171,8 @@ class KeyboardHook:
 
         # ── Stage 1: Instant local prediction ──────────────────────────────
         if self.habits:
-            local_pred = self.habits.predict(context)
+            prefix = ''.join(self._word_buf)
+            local_pred = self.habits.predict(context, prefix)
             if local_pred and gen == self._suggestion_gen:
                 show_if_matching(local_pred)
 
@@ -194,12 +200,16 @@ class KeyboardHook:
     def _on_key(self, event) -> None:
         if not self._running:
             return
-        if self.autocorrect.is_applying:
+        if self.autocorrect.is_applying or getattr(self.sentence_fixer, 'is_simulating', False):
             return
 
         name: str = event.name or ''
         is_down   = event.event_type == 'down'
         is_up     = event.event_type == 'up'
+
+        # Increment keystroke count for physical key-downs (non-simulated)
+        if is_down:
+            self.keystroke_count += 1
 
         # ── Track Shift / Caps Lock ──
         if name in ('left shift', 'right shift', 'shift'):
@@ -235,6 +245,7 @@ class KeyboardHook:
         if not is_down:
             return
 
+
         # ── Ctrl held + another key → shortcut (Ctrl+C, etc.) ──
         if self._ctrl_held:
             self._ctrl_used = True
@@ -262,7 +273,6 @@ class KeyboardHook:
             self._word_buf.clear()
             self._ctx_buf.append(' ')
             self._trim_ctx()
-            self.autocorrect.notify_new_char()
 
             if self.config.get('enabled'):
                 # Record word in typing habits
@@ -288,7 +298,7 @@ class KeyboardHook:
                 self._word_buf.pop()
             if self._ctx_buf:
                 self._ctx_buf.pop()
-            self.autocorrect.notify_backspace()
+            self.autocorrect.notify_keystroke()
 
             if self._active_suggestion:
                 prefix = ''.join(self._word_buf)
@@ -312,7 +322,7 @@ class KeyboardHook:
             self._word_buf.clear()
             self._ctx_buf.append('\n')
             self._trim_ctx()
-            self.autocorrect.notify_new_char()
+            self.autocorrect.notify_keystroke()
             self._cancel_suggestion()
             return
 
@@ -323,23 +333,37 @@ class KeyboardHook:
             self._word_buf.append(char)
             self._ctx_buf.append(char)
             self._trim_ctx()
-            self.autocorrect.notify_new_char()
+            self.autocorrect.notify_keystroke()
 
-            # Dynamic narrowing: if we have an active suggestion, check if it still matches
-            if self._active_suggestion:
-                prefix = ''.join(self._word_buf)
-                if self._active_suggestion.lower().startswith(prefix.lower()):
-                    suffix = self._active_suggestion[len(prefix):]
+            # Dynamic narrowing / instant local prefix prediction
+            prefix = ''.join(self._word_buf)
+            if self._active_suggestion and self._active_suggestion.lower().startswith(prefix.lower()):
+                suffix = self._active_suggestion[len(prefix):]
+                if suffix:
+                    def update_pos():
+                        time.sleep(0.01)  # Micro-sleep to let application update caret
+                        pos = get_caret_screen_pos()
+                        if pos and self._active_suggestion:
+                            x, y, pt = pos
+                            self._ghost.show(suffix, x, y, pt)
+                    threading.Thread(target=update_pos, daemon=True).start()
+                else:
+                    self._cancel_suggestion()
+            elif self.habits:
+                # Query local self-learning engine for instant autocomplete
+                context = ''.join(self._ctx_buf[-200:])
+                local_pred = self.habits.predict(context, prefix)
+                if local_pred:
+                    suffix = local_pred[len(prefix):]
                     if suffix:
                         def update_pos():
                             time.sleep(0.01)  # Micro-sleep to let application update caret
                             pos = get_caret_screen_pos()
-                            if pos and self._active_suggestion:
+                            if pos:
                                 x, y, pt = pos
+                                self._active_suggestion = local_pred
                                 self._ghost.show(suffix, x, y, pt)
                         threading.Thread(target=update_pos, daemon=True).start()
-                    else:
-                        self._cancel_suggestion()
                 else:
                     self._cancel_suggestion()
             else:

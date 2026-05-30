@@ -4,3 +4,5 @@ pystray>=0.19.5
 Pillow>=10.0.0
 pyperclip>=1.9.0
 pywin32>=306
+pyspellchecker>=0.8.1
+
